@@ -259,44 +259,14 @@ static void CollectWin32Elements(std::vector<ClickableElement>& out)
 
 std::vector<ClickableElement> CollectElements()
 {
-    static HWND s_lastHwnd = nullptr;
-    static RECT s_lastRect = {};
-    static DWORD s_lastTick = 0;
-    static std::vector<ClickableElement> s_cachedElements;
-
-    constexpr DWORD CACHE_TTL_MS = 5000;
-
     HWND fgWnd = GetForegroundWindow();
-    if (!fgWnd)
-    {
-        s_lastHwnd = nullptr;
-        s_cachedElements.clear();
-        return {};
-    }
-
-    RECT currentRect = {};
-    GetWindowRect(fgWnd, &currentRect);
-
-    DWORD now = GetTickCount();
-    bool cacheValid = (fgWnd == s_lastHwnd)
-        && (now - s_lastTick < CACHE_TTL_MS)
-        && (EqualRect(&currentRect, &s_lastRect));
-
-    if (cacheValid)
-    {
-        return s_cachedElements;
-    }
+    if (!fgWnd) return {};
 
     std::vector<ClickableElement> elements;
     CollectUIAElements(elements);
     CollectWin32Elements(elements);
     DeduplicateAndFilter(elements);
     SortAndLabel(elements);
-
-    s_lastHwnd = fgWnd;
-    s_lastRect = currentRect;
-    s_lastTick = now;
-    s_cachedElements = elements;
 
     return elements;
 }
