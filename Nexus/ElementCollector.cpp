@@ -5,6 +5,15 @@
 
 static bool IsRectSimilar(const RECT& a, const RECT& b)
 {
+    int areaA = (a.right - a.left) * (a.bottom - a.top);
+    int areaB = (b.right - b.left) * (b.bottom - b.top);
+    int minArea = min(areaA, areaB);
+    int maxArea = max(areaA, areaB);
+
+    // 如果面积差距很大（超过4倍），认为是包含关系，不是相似，保留两者
+    if (maxArea > minArea * 4)
+        return false;
+
     int centerAX = (a.left + a.right) / 2;
     int centerAY = (a.top + a.bottom) / 2;
     int centerBX = (b.left + b.right) / 2;
@@ -12,7 +21,7 @@ static bool IsRectSimilar(const RECT& a, const RECT& b)
 
     int dx = centerAX - centerBX;
     int dy = centerAY - centerBY;
-    if (dx * dx + dy * dy < 100) // 中心点距离 < 10px
+    if (dx * dx + dy * dy < 100) // 中心点距离平方 < 100 (即 < 10px)
         return true;
 
     int interLeft = max(a.left, b.left);
@@ -24,9 +33,6 @@ static bool IsRectSimilar(const RECT& a, const RECT& b)
         return false;
 
     int interArea = (interRight - interLeft) * (interBottom - interTop);
-    int areaA = (a.right - a.left) * (a.bottom - a.top);
-    int areaB = (b.right - b.left) * (b.bottom - b.top);
-    int minArea = min(areaA, areaB);
 
     return minArea > 0 && (interArea * 2 > minArea);
 }
@@ -128,6 +134,17 @@ static void CollectUIAElements(std::vector<ClickableElement>& out)
             pArr->GetElement(i, &pElem);
             if (!pElem) continue;
 
+            // 跳过禁用的控件
+            VARIANT varEnabled = {};
+            if (SUCCEEDED(pElem->GetCurrentPropertyValue(UIA_IsEnabledPropertyId, &varEnabled)) &&
+                varEnabled.vt == VT_BOOL && varEnabled.boolVal == VARIANT_FALSE)
+            {
+                pElem->Release();
+                VariantClear(&varEnabled);
+                continue;
+            }
+            VariantClear(&varEnabled);
+
             RECT rc = {};
             hr = pElem->get_CurrentBoundingRectangle(&rc);
             if (SUCCEEDED(hr))
@@ -151,32 +168,37 @@ static void CollectUIAElements(std::vector<ClickableElement>& out)
                     VariantClear(&var);
                 }
 
-                if (!ok)
+                // 获取控件类型
+                CONTROLTYPEID controlType = UIA_CustomControlTypeId;
+                if (SUCCEEDED(pElem->get_CurrentControlType(&controlType)))
                 {
-                    CONTROLTYPEID controlType = UIA_CustomControlTypeId;
-                    if (SUCCEEDED(pElem->get_CurrentControlType(&controlType)))
+                    // 黑名单：Text 类型完全排除（QQ 消息数量、等级、头衔等）
+                    if (controlType == UIA_TextControlTypeId)
                     {
-                        if (controlType == UIA_ButtonControlTypeId ||
-                            controlType == UIA_MenuItemControlTypeId ||
-                            controlType == UIA_HyperlinkControlTypeId ||
-                            controlType == UIA_TabItemControlTypeId ||
-                            controlType == UIA_ListItemControlTypeId ||
-                            controlType == UIA_TreeItemControlTypeId ||
-                            controlType == UIA_SplitButtonControlTypeId ||
-                            controlType == UIA_ComboBoxControlTypeId ||
-                            controlType == UIA_CheckBoxControlTypeId ||
-                            controlType == UIA_RadioButtonControlTypeId ||
-                            controlType == UIA_EditControlTypeId ||
-                            controlType == UIA_DocumentControlTypeId ||
-                            controlType == UIA_GroupControlTypeId)
-                        {
-                            ok = true;
-                        }
+                        ok = false;
+                    }
+                    // 白名单：核心交互控件直接视为可点击
+                    else if (controlType == UIA_ButtonControlTypeId ||
+                             controlType == UIA_MenuItemControlTypeId ||
+                             controlType == UIA_HyperlinkControlTypeId ||
+                             controlType == UIA_TabItemControlTypeId ||
+                             controlType == UIA_ListItemControlTypeId ||
+                             controlType == UIA_TreeItemControlTypeId ||
+                             controlType == UIA_SplitButtonControlTypeId ||
+                             controlType == UIA_ComboBoxControlTypeId ||
+                             controlType == UIA_CheckBoxControlTypeId ||
+                             controlType == UIA_RadioButtonControlTypeId ||
+                             controlType == UIA_EditControlTypeId ||
+                             controlType == UIA_DocumentControlTypeId)
+                    {
+                        ok = true;
                     }
                 }
 
                 if (ok)
+                {
                     out.push_back({ rc, L"" });
+                }
             }
             pElem->Release();
         }
@@ -216,6 +238,7 @@ static BOOL CALLBACK EnumChildProc(HWND hwnd, LPARAM lParam)
         interactive = true;
     }
     if (style & WS_TABSTOP) interactive = true;
+    // 低4位为0表示 BS_PUSHBUTTON (值为0)，即标准按钮类型
     if ((style & 0x0F) == BS_PUSHBUTTON) interactive = true;
 
     if (interactive)
